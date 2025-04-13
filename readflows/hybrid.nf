@@ -65,7 +65,7 @@ if (params.modular=="full" | params.modular=="annotate" | params.modular=="assem
 include {readme_output} from '../modules/readme_output' params(output: params.output)
 include {test} from '../modules/test_data_dll'
 
-workflow hybrid_workflow {
+workflow hybrid_workflow{
 
     // Step 1: Skip assembly and use Unicycler contigs
     if (!params.contigs) {
@@ -73,22 +73,6 @@ workflow hybrid_workflow {
     }
     assembly_ch = Channel.fromPath("${params.contigs}")
     println "Loaded Unicycler contigs from: ${params.contigs}"
-
-    // Mapping reads to contigs
-    illumina_bam_ch = null
-    ont_bam_ch = null
-
-    if (params.illumina) {
-        illumina_input_ch = Channel.fromFilePairs("${params.illumina}/*_R{1,2}.fastq{,.gz}", checkIfExists: true)
-        illumina_bam_ch = bwa(assembly_ch.join(illumina_input_ch))
-        println "Mapped Illumina reads to contigs."
-    }
-
-    if (params.ont) {
-        ont_input_ch = Channel.fromPath("${params.ont}/*.fastq{,.gz}", checkIfExists: true).map { file -> tuple(file.simpleName, file) }
-        ont_bam_ch = minimap2(assembly_ch.join(ont_input_ch))
-        println "Mapped ONT reads to contigs."
-    }
 
     // Binning
     if (!params.bintool) {
@@ -454,3 +438,7 @@ workflow.onComplete {
 //***********
 //DONE
 //***********
+
+workflow {
+    hybrid_workflow()
+}
