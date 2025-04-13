@@ -235,7 +235,6 @@ workflow hybrid_workflow {
                     bin_out_ch = metabat2.out
                 }
         }
-    }
     
 
     //end of step 1
