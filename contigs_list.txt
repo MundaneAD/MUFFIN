@@ -1,0 +1,8 @@
+/dataA/lion/mags/unicyler/C187/assembly.fasta
+/dataA/lion/mags/unicyler/4918/assembly.fasta
+/dataA/lion/mags/unicyler/C186B/assembly.fasta
+/dataA/lion/mags/unicyler/C178/assembly.fasta
+/dataA/lion/mags/unicyler/4924/assembly.fasta
+/dataA/lion/mags/unicyler/C186/assembly.fasta
+/dataA/lion/mags/unicyler/4915/assembly.fasta
+/dataA/lion/mags/unicyler/4921/assembly.fasta
