@@ -20,6 +20,7 @@ if (params.modular=="full" | params.modular=="assemble" | params.modular=="assem
     include {bwa_bin} from '../modules/bwa' //mapping for the binning
     include {extra_bwa} from '../modules/bwa'   
     include {metabat2} from '../modules/metabat2' params(output : params.output)
+    include {metabat2 as metabat2_again} from '../modules/metabat2' params(output : params.output)
     include {metabat2_extra} from '../modules/metabat2' params(output : params.output)
     include {semibin2} from '../modules/semibin2' params(output : params.output, bining_model : params.bining_model, environment : params.environment)
     include {comebin} from '../modules/comebin' params(output : params.output)
@@ -65,7 +66,7 @@ if (params.modular=="full" | params.modular=="annotate" | params.modular=="assem
 include {readme_output} from '../modules/readme_output' params(output: params.output)
 include {test} from '../modules/test_data_dll'
 
-workflow hybrid_workflow{
+workflow hybrid_workflow {
 
     // Step 1: Skip assembly and use Unicycler contigs
     if (!params.contigs) {
@@ -74,6 +75,21 @@ workflow hybrid_workflow{
     assembly_ch = Channel.fromPath("${params.contigs}")
     println "Loaded Unicycler contigs from: ${params.contigs}"
         
+        //*********
+        // Input Channels
+        //*********
+        if (params.ont) {
+            ont_input_ch = Channel.fromPath("${params.ont}/*.fastq{,.gz}", checkIfExists: true).map { file -> tuple(file.simpleName, file) }
+        } else {
+            error "ONT input reads are required but were not provided. Use the --ont parameter to specify the path."
+        }
+
+        if (params.illumina) {
+            illumina_input_ch = Channel.fromFilePairs("${params.illumina}/*_R{1,2}.fastq{,.gz}", checkIfExists: true)
+        } else {
+            error "Illumina input reads are required but were not provided. Use the --illumina parameter to specify the path."
+        }
+
         //*********
         // Mapping
         //*********
@@ -183,8 +199,8 @@ workflow hybrid_workflow{
                     bin_out_ch = metabat2_extra.out
                 }
                 else {
-                    metabat2(assembly_ch.join(ont_bam_ch).join(illumina_bam_ch))
-                    bin_out_ch = metabat2.out
+                    metabat2_again(assembly_ch.join(ont_bam_ch).join(illumina_bam_ch))
+                    bin_out_ch = metabat2_again.out
                 }
                 break
 
@@ -270,6 +286,23 @@ workflow hybrid_workflow{
         // Bins classify workflow
         //*************************
 
+if (!params.checkm2db) {
+    println "Checkm2 database configuration"
+    
+    // Check if the path and file exist
+    def db_path_exists = file(params.db_path).exists() && file("${params.db_path}/${params.db_file}").exists()
+    
+    if (!db_path_exists || params.checkm2db_force_update) {
+        // Invoke the checkm_download_db process
+        checkm_download_db()
+        checkm_db_out = checkm_download_db.out
+    } else {
+        println "The specified folder and file already exist. Continuing without downloading."
+        checkm_db_out = file("${params.db_path}/${params.db_file}")
+    }
+} else {
+    error "Checkm2 database parameters are required but were not provided."
+}
         //checkm of the final assemblies
         checkm2(classify_ch, checkm_download_db.out)
 
@@ -426,11 +459,7 @@ workflow hybrid_workflow{
     
     readme_output()
 
-   
-
-    
-
-}
+    }
 
 workflow.onComplete { 
     log.info ( workflow.success ? "\nDone! Results are stored here --> $params.output \n The Readme file in $params.output describe the structure of the results directories. \n" : "Oops .. something went wrong" )  
