@@ -121,6 +121,8 @@ workflow hybrid_workflow{
         //*********
         // Mapping
         //*********
+        illumina_bam_ch = null
+        ont_bam_ch = null
 
         // Mapping with Minimap2 for ONT reads
         ont_bam_ch = minimap2(assembly_ch.join(ont_input_ch))
