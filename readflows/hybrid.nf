@@ -73,7 +73,48 @@ workflow hybrid_workflow{
     }
     assembly_ch = Channel.fromPath("${params.contigs}")
     println "Loaded Unicycler contigs from: ${params.contigs}"
+        
+        //*********
+        // Mapping
+        //*********
+        illumina_bam_ch = null
+        ont_bam_ch = null
+        extra_bam_ch = null
 
+        // Mapping with Minimap2 for ONT reads
+        ont_bam_ch = minimap2(assembly_ch.join(ont_input_ch))
+        // Mapping with BWA for Illumina reads
+        illumina_bam_ch = bwa(assembly_ch.join(illumina_input_ch))
+
+
+        // Mapping additional ONT reads if specified
+        if (params.extra_ont) {
+             extra_ont_ch=Channel.fromPath(params.extra_ont).splitCsv().map { row ->
+                        def path = file("${row[0]}")
+                        return path
+                    }
+
+            extra_bam_ch = extra_minimap2(assembly_ch.join(extra_ont_ch))
+        }
+
+        // Mapping additional Illumina reads if specified
+        if (params.extra_ill) {
+            extra_ill_ch=Channel.fromPath(params.extra_ill).splitCsv().map { row ->
+                        def path = file("${row[0]}")
+                        return path
+                    }
+
+            illumina_extra_bam_ch = extra_bwa(assembly_ch.join(extra_ill_ch))
+
+            if (params.extra_ont){
+                extra_bam_ch = bam_merger_extra(extra_bam_ch.join(illumina_extra_bam_ch))
+            }
+            else{
+                extra_bam_ch = illumina_extra_bam_ch
+            }
+            // Simplified merging logic by using conditional operator
+            //extra_bam_ch = params.extra_ont ? bam_merger_extra(extra_bam_ch.join(illumina_extra_bam_ch)) : illumina_extra_bam_ch
+        }
     // Binning
     if (!params.bintool) {
         params.bintool = 'metabat2' // Default binning tool
@@ -116,49 +157,6 @@ workflow hybrid_workflow{
         default:
             error "Unrecognized bintool: ${params.bintool}"
     }
-
-
-        //*********
-        // Mapping
-        //*********
-        illumina_bam_ch = null
-        ont_bam_ch = null
-
-        // Mapping with Minimap2 for ONT reads
-        ont_bam_ch = minimap2(assembly_ch.join(ont_input_ch))
-        // Mapping with BWA for Illumina reads
-        illumina_bam_ch = bwa(assembly_ch.join(illumina_input_ch))
-
-
-        // Mapping additional ONT reads if specified
-        if (params.extra_ont) {
-             extra_ont_ch=Channel.fromPath(params.extra_ont).splitCsv().map { row ->
-                        def path = file("${row[0]}")
-                        return path
-                    }
-
-            extra_bam_ch = extra_minimap2(assembly_ch.join(extra_ont_ch))
-        }
-
-        // Mapping additional Illumina reads if specified
-        if (params.extra_ill) {
-            extra_ill_ch=Channel.fromPath(params.extra_ill).splitCsv().map { row ->
-                        def path = file("${row[0]}")
-                        return path
-                    }
-
-            illumina_extra_bam_ch = extra_bwa(assembly_ch.join(extra_ill_ch))
-
-            if (params.extra_ont){
-                extra_bam_ch = bam_merger_extra(extra_bam_ch.join(illumina_extra_bam_ch))
-            }
-            else{
-                extra_bam_ch = illumina_extra_bam_ch
-            }
-            // Simplified merging logic by using conditional operator
-            //extra_bam_ch = params.extra_ont ? bam_merger_extra(extra_bam_ch.join(illumina_extra_bam_ch)) : illumina_extra_bam_ch
-        }
-
 
         //***************************************************
         // Assembly quality control (metaquast)
