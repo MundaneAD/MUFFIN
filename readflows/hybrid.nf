@@ -65,45 +65,73 @@ if (params.modular=="full" | params.modular=="annotate" | params.modular=="assem
 include {readme_output} from '../modules/readme_output' params(output: params.output)
 include {test} from '../modules/test_data_dll'
 
-workflow hybrid_workflow{
-    if (params.modular=="full" | params.modular=="assemble" | params.modular=="assem-class" | params.modular=="assem-annot") {
-        //Channel illumina_input_ch, ont_input_ch
+workflow hybrid_workflow {
 
-        if (!params.ont || !params.illumina) error "Both ONT and Illumina reads paths must be specified for 'hybride' read type."
+    // Step 1: Skip assembly and use Unicycler contigs
+    if (!params.contigs) {
+        error "You must provide a contigs file (e.g., Unicycler output) using the --contigs parameter."
+    }
+    assembly_ch = Channel.fromPath("${params.contigs}")
+    println "Loaded Unicycler contigs from: ${params.contigs}"
 
-        //ont_input_ch = Channel.fromPath("${params.ont}/*.fastq{,.gz}", checkIfExists: true).map { file -> tuple(file.baseName, file) }
-        ont_input_ch = Channel.fromPath("${params.ont}/*.fastq{,.gz}", checkIfExists: true).map {file -> tuple(file.simpleName, file) }.view()
-        
+    // Mapping reads to contigs
+    illumina_bam_ch = null
+    ont_bam_ch = null
+
+    if (params.illumina) {
         illumina_input_ch = Channel.fromFilePairs("${params.illumina}/*_R{1,2}.fastq{,.gz}", checkIfExists: true)
+        illumina_bam_ch = bwa(assembly_ch.join(illumina_input_ch))
+        println "Mapped Illumina reads to contigs."
+    }
 
-        if (!params.skip_ont_qc) {
-            ont_input_ch = chopper(ont_input_ch)
-        }
-        if (!params.skip_ill_qc) {
-            illumina_input_ch = fastp(illumina_input_ch)
-        }
+    if (params.ont) {
+        ont_input_ch = Channel.fromPath("${params.ont}/*.fastq{,.gz}", checkIfExists: true).map { file -> tuple(file.simpleName, file) }
+        ont_bam_ch = minimap2(assembly_ch.join(ont_input_ch))
+        println "Mapped ONT reads to contigs."
+    }
 
-        switch (params.assembler) {
-            case "metaspades":
-                spades_ch = illumina_input_ch.join(ont_input_ch)
-                spades(spades_ch)
-                spades.out.set { assembly_ch }
-                break
+    // Binning
+    if (!params.bintool) {
+        params.bintool = 'metabat2' // Default binning tool
+    }
+    println "Using binning tool: ${params.bintool}"
 
-            case "metaflye":
-                // MetaFlye suivi d'un polissage hybride
-                flye(ont_input_ch)
-                // Chaîne de polissage simplifiée
-                minimap_polish_ch = minimap_polish(flye.out.join(ont_input_ch))
-                racon_ch = racon(ont_input_ch.join(flye.out).join(minimap_polish_ch))
-                assembly_ch = medaka(racon_ch)
-                //assembly_ch = medaka_ch
-                //assembly_ch = pilon(medaka_ch.join(illumina_input_ch), params.polish_iteration)
-                break
+    switch (params.bintool) {
+        case 'metabat2':
+            if (illumina_bam_ch && ont_bam_ch) {
+                metabat2_ch = assembly_ch.join(ont_bam_ch).join(illumina_bam_ch)
+            } else if (illumina_bam_ch) {
+                metabat2_ch = assembly_ch.join(illumina_bam_ch)
+            } else {
+                metabat2_ch = assembly_ch.join(ont_bam_ch)
+            }
+            metabat2(metabat2_ch)
+            bin_out_ch = metabat2.out
+            println "Binning completed using MetaBAT2."
+            break
 
-            default:
-                error "Unrecognized assembler: ${params.assembler}. Should be 'metaspades' or 'metaflye'."
-        }
+        case 'semibin2':
+            bam_merger_ch = illumina_bam_ch && ont_bam_ch ? ont_bam_ch.join(illumina_bam_ch) : (illumina_bam_ch ?: ont_bam_ch)
+            merged_bam_out = bam_merger(bam_merger_ch)
+            semibin2_ch = assembly_ch.join(merged_bam_out)
+            semibin2(semibin2_ch)
+            bin_out_ch = semibin2.out
+            println "Binning completed using SemiBin2."
+            break
+
+        case 'comebin':
+            bam_merger_ch = illumina_bam_ch && ont_bam_ch ? ont_bam_ch.join(illumina_bam_ch) : (illumina_bam_ch ?: ont_bam_ch)
+            merged_bam_out = bam_merger(bam_merger_ch)
+            n50_ch = n50(assembly_ch)
+            comebin_ch = assembly_ch.join(merged_bam_out).join(n50_ch)
+            comebin(comebin_ch)
+            bin_out_ch = comebin.out
+            println "Binning completed using ComeBin."
+            break
+
+        default:
+            error "Unrecognized bintool: ${params.bintool}"
+    }
 
 
         //*********
